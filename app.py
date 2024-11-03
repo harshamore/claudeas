@@ -6,11 +6,10 @@ import tempfile
 import os
 
 # Initialize OpenAI API key
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+openai.api_key = "YOUR_OPENAI_API_KEY"
 
 def consolidate_accounts(df_parent, df_subsidiary):
     # Placeholder consolidation logic using AS 21 principles
-    # Sample check for inter-company balances or goodwill uncertainty
     if "inter_company_balance" in df_subsidiary.columns:
         clarification = consult_openai_for_as21_clarity("guidance on inter-company balances in AS 21")
         st.write("AS 21 Guidance (Inter-company Balances):", clarification)
@@ -19,21 +18,23 @@ def consolidate_accounts(df_parent, df_subsidiary):
         clarification = consult_openai_for_as21_clarity("goodwill calculation guidance under AS 21")
         st.write("AS 21 Guidance (Goodwill Calculation):", clarification)
 
-    # Consolidate by removing inter-company balances, calculating goodwill, etc. (simplified example)
     df_consolidated = pd.concat([df_parent, df_subsidiary]).groupby(level=0).sum()
     return df_consolidated
 
 def consult_openai_for_as21_clarity(query):
-    # Use the latest ChatCompletion API to get guidance on AS 21 without sharing specific data
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # Or "gpt-4" if available and preferred
-        messages=[
-            {"role": "system", "content": "You are an expert in Indian Accounting Standard AS 21."},
-            {"role": "user", "content": f"Provide guidance on AS 21 for: {query}"}
-        ],
-        max_tokens=100
-    )
-    return response.choices[0].message['content'].strip()
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert in Indian Accounting Standard AS 21."},
+                {"role": "user", "content": f"Provide guidance on AS 21 for: {query}"}
+            ],
+            max_tokens=100
+        )
+        return response.choices[0].message['content'].strip()
+    except Exception as e:
+        st.error("Error with OpenAI API: Unable to retrieve guidance.")
+        return "Unable to retrieve AS 21 guidance at this time."
 
 def convert_excel_to_pdf(df, filename):
     pdf = FPDF()
