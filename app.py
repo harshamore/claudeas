@@ -9,7 +9,7 @@ import os
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 def consolidate_accounts(df_parent, df_subsidiary):
-    # Placeholder consolidation logic that uses AS 21 principles
+    # Placeholder consolidation logic using AS 21 principles
     # Sample check for inter-company balances or goodwill uncertainty
     if "inter_company_balance" in df_subsidiary.columns:
         clarification = consult_openai_for_as21_clarity("guidance on inter-company balances in AS 21")
@@ -24,13 +24,16 @@ def consolidate_accounts(df_parent, df_subsidiary):
     return df_consolidated
 
 def consult_openai_for_as21_clarity(query):
-    # Call OpenAI with generalized query on AS 21 without sharing any specific user data
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=f"Provide guidance on AS 21 for: {query}",
+    # Use the latest ChatCompletion API to get guidance on AS 21 without sharing specific data
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # Or "gpt-4" if available and preferred
+        messages=[
+            {"role": "system", "content": "You are an expert in Indian Accounting Standard AS 21."},
+            {"role": "user", "content": f"Provide guidance on AS 21 for: {query}"}
+        ],
         max_tokens=100
     )
-    return response.choices[0].text.strip()
+    return response.choices[0].message['content'].strip()
 
 def convert_excel_to_pdf(df, filename):
     pdf = FPDF()
