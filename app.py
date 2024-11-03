@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from openai import OpenAI
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 import logging
 from pathlib import Path
@@ -126,7 +126,7 @@ class AS21Processor:
         """Add subsidiary amounts to consolidated statements"""
         
         # Calculate minority interest
-        minority_interest = (1 - ownership/100)
+        minority_interest = (1 - ownership / 100)
         
         # Add subsidiary amounts line by line
         for column in subsidiary.columns:
@@ -134,14 +134,18 @@ class AS21Processor:
                 # Skip if it's an elimination account
                 if 'intercompany' in column.lower():
                     continue
-                    
-                # Add subsidiary amount
-                consolidated[column] += subsidiary[column] * (ownership/100)
                 
-                # Add minority interest column if needed
-                mi_column = f"minority_interest_{column}"
-                consolidated[mi_column] = subsidiary[column] * minority_interest
-        
+                # Only add numeric columns
+                if pd.api.types.is_numeric_dtype(subsidiary[column]):
+                    # Add subsidiary amount
+                    consolidated[column] += subsidiary[column] * (ownership / 100)
+                    
+                    # Add minority interest column if needed
+                    mi_column = f"minority_interest_{column}"
+                    if mi_column not in consolidated.columns:
+                        consolidated[mi_column] = 0  # Initialize minority interest column
+                    consolidated[mi_column] += subsidiary[column] * minority_interest
+
         return consolidated
 
 class ReportGenerator:
@@ -275,7 +279,4 @@ def main():
         
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
-            logger.error(f"Application error: {str(e)}")
-
-if __name__ == "__main__":
-    main()
+            logger.error(f"Application error: {str(e)}
