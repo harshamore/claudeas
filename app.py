@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import openai
+from openai import OpenAI
 from typing import List, Dict
 from dataclasses import dataclass
 import logging
@@ -25,7 +25,7 @@ class AS21Processor:
     """Handles AS21 consolidation rules and processing"""
     
     def __init__(self):
-        openai.api_key = st.secrets["OPENAI_API_KEY"]
+        self.client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     
     def _is_numeric_column(self, df: pd.DataFrame, column: str) -> bool:
         """Check if a column contains numeric data"""
@@ -35,10 +35,12 @@ class AS21Processor:
         """Convert numeric columns to float, leaving non-numeric columns unchanged"""
         numeric_df = df.copy()
         for column in numeric_df.columns:
-            if pd.api.types.is_numeric_dtype(numeric_df[column]):
-                numeric_df[column] = pd.to_numeric(numeric_df[column], errors='coerce').fillna(0)
-            else:
-                numeric_df[column] = numeric_df[column].astype(str).fillna('')
+            try:
+                # Convert only numeric columns
+                if pd.api.types.is_numeric_dtype(numeric_df[column]):
+                    numeric_df[column] = pd.to_numeric(numeric_df[column], errors='coerce').fillna(0)
+            except Exception as e:
+                logger.warning(f"Could not convert column {column} to numeric: {str(e)}")
         return numeric_df
 
     def analyze_statement(self, df: pd.DataFrame, sheet_name: str) -> Dict:
@@ -55,7 +57,7 @@ class AS21Processor:
             3. Potential consolidation issues
             4. Required eliminations
             """
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}]
             )
