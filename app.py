@@ -45,7 +45,7 @@ class AS21Processor:
         
         return response.choices[0].message.content
 
-    def analyze_all_sheets(self, xls: pd.ExcelFile) -> Dict[str, str]:
+    def analyze_all_sheets(self, xls: pd.ExcelFile) -> dict[str, str]:
         """Iterate through all sheets and analyze each one, handling empty or image-only sheets gracefully."""
         analysis_results = {}
         for sheet_name in xls.sheet_names:
