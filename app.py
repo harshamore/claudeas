@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import openai  # Import openai directly
+import openai
 import logging
 from io import BytesIO
 from typing import Optional
@@ -22,11 +22,12 @@ class AS21Processor:
         if question in self.known_responses:
             return self.known_responses[question]
         
-        response = openai.ChatCompletion.create(  # Corrected this line
+        # Make synchronous API call to OpenAI
+        response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": question}],
             max_tokens=300
-        ).choices[0].message.content.strip()
+        ).choices[0].message["content"].strip()
         
         # Cache the response
         self.known_responses[question] = response
