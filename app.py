@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from openai import OpenAI
+import openai  # Import openai directly
 import logging
 from io import BytesIO
 from typing import Optional
@@ -14,7 +14,7 @@ class AS21Processor:
     """Handles AS21 consolidation rules and processing with selective OpenAI support"""
     
     def __init__(self):
-        self.client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
         self.known_responses = {}  # Cache to store common clarifications from OpenAI
     
     def ask_openai(self, question: str) -> str:
@@ -22,7 +22,7 @@ class AS21Processor:
         if question in self.known_responses:
             return self.known_responses[question]
         
-        response = self.client.ChatCompletion.create(
+        response = openai.ChatCompletion.create(  # Corrected this line
             model="gpt-4",
             messages=[{"role": "user", "content": question}],
             max_tokens=300
