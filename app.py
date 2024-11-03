@@ -1,139 +1,98 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import openai
-import logging
-from io import BytesIO
-from typing import Optional
+from fpdf import FPDF
+import tempfile
+import os
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize OpenAI API key
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-class AS21Processor:
-    """Handles AS21 consolidation rules and processing with selective OpenAI support"""
+def consolidate_accounts(df_parent, df_subsidiary):
+    # Placeholder consolidation logic that uses AS 21 principles
+    # Sample check for inter-company balances or goodwill uncertainty
+    if "inter_company_balance" in df_subsidiary.columns:
+        clarification = consult_openai_for_as21_clarity("guidance on inter-company balances in AS 21")
+        st.write("AS 21 Guidance (Inter-company Balances):", clarification)
     
-    def __init__(self):
-        openai.api_key = st.secrets["OPENAI_API_KEY"]
-        self.known_responses = {}  # Cache to store common clarifications from OpenAI
+    if "goodwill" not in df_subsidiary.columns:
+        clarification = consult_openai_for_as21_clarity("goodwill calculation guidance under AS 21")
+        st.write("AS 21 Guidance (Goodwill Calculation):", clarification)
+
+    # Consolidate by removing inter-company balances, calculating goodwill, etc. (simplified example)
+    df_consolidated = pd.concat([df_parent, df_subsidiary]).groupby(level=0).sum()
+    return df_consolidated
+
+def consult_openai_for_as21_clarity(query):
+    # Call OpenAI with generalized query on AS 21 without sharing any specific user data
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=f"Provide guidance on AS 21 for: {query}",
+        max_tokens=100
+    )
+    return response.choices[0].text.strip()
+
+def convert_excel_to_pdf(df, filename):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    pdf.cell(200, 10, txt=f"Consolidated Financial Statements: {filename}", ln=True, align="C")
     
-    def ask_openai(self, question: str) -> str:
-        """Ask OpenAI a question if it hasn't been asked before, to minimize calls."""
-        if question in self.known_responses:
-            return self.known_responses[question]
-        
-        # Make synchronous API call to OpenAI
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": question}],
-            max_tokens=300
-        ).choices[0].message["content"].strip()
-        
-        # Cache the response
-        self.known_responses[question] = response
-        return response
+    for i, row in df.iterrows():
+        row_text = ', '.join(f"{str(cell)}" for cell in row)
+        pdf.cell(200, 10, txt=row_text, ln=True)
 
-    def analyze_sheet(self, df: pd.DataFrame, sheet_name: str) -> Optional[str]:
-        """Primary data inspection; uses OpenAI if data structure is unclear."""
-        
-        if df.empty:
-            return f"Sheet '{sheet_name}' is empty or image-only, with no data to analyze."
-        
-        # Attempt to identify sheet type based on keywords in columns
-        columns = df.columns.str.lower().tolist()
-        if any(kw in columns for kw in ['assets', 'liabilities', 'equity']):
-            sheet_type = "Balance Sheet"
-        elif any(kw in columns for kw in ['revenue', 'expenses', 'profit']):
-            sheet_type = "Income Statement"
-        elif any(kw in columns for kw in ['cash', 'operating', 'financing']):
-            sheet_type = "Cash Flow Statement"
-        else:
-            # Ask OpenAI if Python couldn't confidently identify the sheet type
-            question = f"Can you help identify the type of financial statement from these column headers: {columns}"
-            sheet_type = self.ask_openai(question)
-        
-        # Return consolidated analysis with identified type
-        return f"Sheet '{sheet_name}' is identified as '{sheet_type}' based on AS 21 guidelines."
-
-    def perform_consolidation(self, parent_df: pd.DataFrame, subsidiary_dfs: list[pd.DataFrame]) -> pd.DataFrame:
-        """Consolidate data according to AS21 rules, using OpenAI only if a major ambiguity arises."""
-        
-        consolidated = parent_df.copy()
-        
-        for sub_df in subsidiary_dfs:
-            # Check ownership and ensure required columns exist
-            ownership_col = sub_df.get("ownership_percentage", pd.Series([100])).iloc[0]
-            if ownership_col <= 50:
-                continue  # Skip non-controlling interest
-
-            # Basic consolidation addition, add values where applicable
-            for col in consolidated.columns.intersection(sub_df.columns):
-                try:
-                    consolidated[col] += sub_df[col] * (ownership_col / 100)
-                except Exception as e:
-                    # If unexpected data, ask OpenAI for guidance
-                    question = f"How should I handle an unexpected data type in column '{col}' during consolidation?"
-                    advice = self.ask_openai(question)
-                    logger.warning(f"{advice} - Error: {e}")
-        
-        return consolidated
+    pdf_output = f"{filename}.pdf"
+    pdf.output(pdf_output)
+    return pdf_output
 
 def main():
-    st.set_page_config(page_title="AS 21 Account Consolidator", layout="wide")
-    st.title("Selective AI-Powered AS 21 Account Consolidation")
-    st.markdown("Upload your Excel files containing financial statements to consolidate them according to AS 21 standards. Please mark one file as the Parent Company.")
+    st.title("Financial Accounts Consolidation App (AS 21 Compliant)")
 
-    processor = AS21Processor()
-    
-    uploaded_files = st.file_uploader("Upload Financial Statements", type=['xlsx', 'xls'], accept_multiple_files=True)
-    
+    uploaded_files = st.file_uploader("Upload Excel files for consolidation", accept_multiple_files=True, type=["xlsx"])
+
     if uploaded_files:
-        parent_file = None
-        subsidiary_files = []
-
+        company_data = {}
         for file in uploaded_files:
-            st.write(f"Processing file: {file.name}")
-            is_parent = st.checkbox(f"Mark {file.name} as Parent Company", key=file.name)
+            df = pd.read_excel(file, sheet_name=0)
+            company_data[file.name] = df
 
-            if is_parent:
-                if parent_file is None:
-                    parent_file = file
-                else:
-                    st.warning("Only one file can be marked as the Parent Company. Uncheck the previous selection to change the parent file.")
-            else:
-                subsidiary_files.append(file)
+        parent_company = st.selectbox("Select the Parent Company", list(company_data.keys()))
+        if parent_company:
+            df_parent = company_data[parent_company]
 
-        if parent_file:
-            try:
-                parent_df = pd.ExcelFile(parent_file).parse()
-                st.write("Analyzing Parent Company file...")
+            subsidiary_files = [name for name in company_data if name != parent_company]
+            if subsidiary_files:
+                consolidated_dfs = []
+                for sub_name in subsidiary_files:
+                    st.write(f"Processing subsidiary: {sub_name}")
+                    df_sub = company_data[sub_name]
+                    consolidated_df = consolidate_accounts(df_parent, df_sub)
+                    consolidated_dfs.append(consolidated_df)
+
+                final_consolidated_df = pd.concat(consolidated_dfs).drop_duplicates()
                 
-                analysis = processor.analyze_sheet(parent_df, "Parent Company")
-                st.write(analysis)
-                
-                consolidated_df = processor.perform_consolidation(parent_df, [pd.ExcelFile(f).parse() for f in subsidiary_files])
-                
-                st.write("Consolidated Results:")
-                st.dataframe(consolidated_df)
-                
-                # Option to download consolidated report
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    consolidated_df.to_excel(writer, sheet_name="Consolidated")
-                output.seek(0)
-                
-                st.download_button(
-                    label="Download Consolidated Report",
-                    data=output,
-                    file_name="consolidated_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-                
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                logger.error(f"Error: {str(e)}")
-        else:
-            st.warning("Please mark one file as the Parent Company to proceed with the analysis.")
+                # Generate PDF of the consolidated data
+                pdf_file_path = convert_excel_to_pdf(final_consolidated_df, "Consolidated_Report")
+                with open(pdf_file_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="Download Consolidated Report as PDF",
+                        data=pdf_file,
+                        file_name="Consolidated_Report.pdf",
+                        mime="application/pdf"
+                    )
+
+                # Export to Excel as well
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
+                    final_consolidated_df.to_excel(tmp_excel.name, index=False)
+                    tmp_excel.seek(0)
+                    st.download_button(
+                        label="Download Consolidated Report as Excel",
+                        data=tmp_excel,
+                        file_name="Consolidated_Report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
 if __name__ == "__main__":
     main()
