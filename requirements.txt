@@ -1,9 +1,5 @@
 streamlit
-pandas
-openpyxl
-fpdf
-PyMuPDF
-openai
 requests
-pyPDF2
-pdfplumber
+Pillow
+pytesseract
+PyMuPDF
