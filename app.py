@@ -80,10 +80,10 @@ if parent_file is not None and subsidiary_files:
         # Select numeric columns to sum
         numeric_cols = consolidated_df.select_dtypes(include=['number']).columns.tolist()
 
-        # Perform groupby sum on numeric columns
-        consolidated_df = consolidated_df.groupby(group_by_column)[numeric_cols].sum().reset_index()
+        # Perform groupby sum on numeric columns without setting index
+        consolidated_df = consolidated_df.groupby(group_by_column, as_index=False)[numeric_cols].sum()
 
-        # Handle non-numeric columns
+        # Handle non-numeric columns if they exist
         non_numeric_cols = [col for col in consolidated_df.columns if col not in numeric_cols + [group_by_column]]
         if non_numeric_cols:
             non_numeric_data = consolidated_df[[group_by_column] + non_numeric_cols].drop_duplicates(subset=group_by_column)
