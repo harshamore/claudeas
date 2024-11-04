@@ -93,7 +93,6 @@ if parent_file is not None and subsidiary_files:
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         for sheet_name, df in consolidated_data.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-        writer.save()
     processed_data = output.getvalue()
 
     st.success("Consolidation Completed")
