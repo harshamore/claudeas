@@ -4,11 +4,16 @@ import io
 import fitz  # PyMuPDF
 import re
 import os
+from docx import Document
+from docx.shared import Inches
 
 # OCR.space API endpoint
 OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image'
 # Get your API key from the environment variable
-OCR_SPACE_API_KEY = "K84620978388957"
+OCR_SPACE_API_KEY = os.getenv('OCR_SPACE_API_KEY')
+if not OCR_SPACE_API_KEY:
+    st.error("OCR_SPACE_API_KEY environment variable not set.")
+    st.stop()
 
 # URL of the PDF document
 pdf_url = "https://resource.cdn.icai.org/69249asb55316-as21.pdf"
@@ -68,12 +73,23 @@ def parse_steps(text):
         steps.append((step_title, step_content))
     return steps
 
-def create_step_function(step_title, step_content, step_number):
-    def step_function():
-        st.write(f"## {step_title}")
-        st.write(step_content)
-        # Add processing logic specific to the step here
-    return step_function
+def create_word_document(steps):
+    """
+    Creates a Word document with the extracted steps.
+    Returns the BytesIO object containing the document data.
+    """
+    doc = Document()
+    doc.add_heading('Extracted Steps', 0)
+
+    for step_title, step_content in steps:
+        doc.add_heading(step_title, level=1)
+        doc.add_paragraph(step_content)
+
+    # Save the document to a BytesIO object
+    doc_io = io.BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+    return doc_io
 
 def main():
     st.title("Process PDF Steps from URL using OCR.space API")
@@ -108,6 +124,20 @@ def main():
 
     st.success(f"Found {len(steps)} steps in the document.")
 
+    # Create the Word document
+    doc_file = create_word_document(steps)
+
+    # Provide a download button for the Word document
+    st.write("---")
+    st.write("## Download Extracted Steps as Word Document")
+    st.download_button(
+        label="Download Word Document",
+        data=doc_file,
+        file_name="Extracted_Steps.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    # Optionally, display the steps in the app
     st.write("---")
     st.write("## Extracted Steps:")
     for i, (step_title, step_content) in enumerate(steps, 1):
@@ -115,11 +145,12 @@ def main():
         st.write(step_content)
         st.write("---")
 
-    st.write("## Execute Steps:")
-    for i, (step_title, step_content) in enumerate(steps, 1):
-        if st.button(f"Run {step_title}"):
-            step_function = create_step_function(step_title, step_content, i)
-            step_function()
+    # Optional: Execute steps
+    # st.write("## Execute Steps:")
+    # for i, (step_title, step_content) in enumerate(steps, 1):
+    #     if st.button(f"Run {step_title}"):
+    #         step_function = create_step_function(step_title, step_content, i)
+    #         step_function()
 
 if __name__ == "__main__":
     main()
