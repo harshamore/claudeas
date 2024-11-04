@@ -75,9 +75,19 @@ if parent_file is not None and subsidiary_files:
                 st.warning(f"Sheet '{sheet_name}' not found in subsidiary '{sub_name}'. Skipping.")
 
         # Sum up the data
-        # Ensure proper grouping by a common key, such as an account code or name
         group_by_column = consolidated_df.columns[0]  # Assuming the first column is the key
-        consolidated_df = consolidated_df.groupby(group_by_column).sum().reset_index()
+
+        # Select numeric columns to sum
+        numeric_cols = consolidated_df.select_dtypes(include=['number']).columns.tolist()
+
+        # Perform groupby sum on numeric columns
+        consolidated_df = consolidated_df.groupby(group_by_column)[numeric_cols].sum().reset_index()
+
+        # Handle non-numeric columns
+        non_numeric_cols = [col for col in consolidated_df.columns if col not in numeric_cols + [group_by_column]]
+        if non_numeric_cols:
+            non_numeric_data = consolidated_df[[group_by_column] + non_numeric_cols].drop_duplicates(subset=group_by_column)
+            consolidated_df = pd.merge(consolidated_df, non_numeric_data, on=group_by_column, how='left')
 
         # Eliminate inter-company transactions
         intercompany_filter = consolidated_df[group_by_column].astype(str).str.contains(
