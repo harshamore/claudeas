@@ -1,95 +1,104 @@
 import streamlit as st
-import requests
-import io
-import fitz  # PyMuPDF
-import os
+import pandas as pd
+from io import BytesIO
 
-# OCR.space API endpoint
-OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image'
-# Get your API key from the environment variable
-OCR_SPACE_API_KEY = "K84620978388957"
+st.title("Financial Accounts Consolidation using IND AS 21")
 
-# URL of the PDF document
-pdf_url = "https://resource.cdn.icai.org/69249asb55316-as21.pdf"
+st.header("Upload Excel Files")
 
-def download_pdf(url):
-    response = requests.get(url)
-    response.raise_for_status()
-    return io.BytesIO(response.content)
+# Upload parent company Excel file
+parent_file = st.file_uploader("Upload Parent Company Excel File", type=['xlsx'], key='parent')
 
-def pdf_to_images(pdf_file):
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    images = []
-    for page_num in range(len(doc)):
-        page = doc.load_page(page_num)
-        pix = page.get_pixmap()
-        img_data = pix.tobytes("png")
-        images.append(img_data)
-    return images
+# Upload subsidiary companies' Excel files
+subsidiary_files = st.file_uploader(
+    "Upload Subsidiary Company Excel Files",
+    type=['xlsx'],
+    accept_multiple_files=True,
+    key='subsidiaries'
+)
 
-def ocr_image_with_api(image_data):
-    payload = {
-        'isOverlayRequired': False,
-        'apikey': OCR_SPACE_API_KEY,
-        'language': 'eng',
-    }
-    files = {
-        'filename': ('image.png', image_data),
-    }
-    response = requests.post(OCR_SPACE_API_URL, data=payload, files=files)
-    result = response.json()
-    if result.get('IsErroredOnProcessing'):
-        st.error("Error during OCR processing.")
-        return ''
-    return result['ParsedResults'][0]['ParsedText']
+# Collect ownership percentages for each subsidiary
+subsidiary_info = {}
+if subsidiary_files:
+    st.header("Enter Ownership Percentages for Subsidiaries")
+    for file in subsidiary_files:
+        sub_name = file.name
+        ownership = st.number_input(
+            f"Ownership percentage of {sub_name} (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=100.0,
+            key=sub_name
+        )
+        subsidiary_info[sub_name] = {'file': file, 'ownership': ownership}
 
-def ocr_images(images):
-    text = ""
-    for idx, image_data in enumerate(images):
-        st.write(f"Performing OCR on page {idx+1}...")
-        page_text = ocr_image_with_api(image_data)
-        text += page_text + "\n"
-    return text
+if parent_file is not None and subsidiary_files:
+    st.header("Processing and Consolidating Data...")
 
-def main():
-    st.title("Extract Text from PDF using OCR.space API")
+    # Read parent company Excel file
+    parent_excel = pd.ExcelFile(parent_file)
+    parent_data = {}
+    for sheet_name in parent_excel.sheet_names:
+        df = parent_excel.parse(sheet_name)
+        parent_data[sheet_name] = df
 
-    st.write("Downloading the PDF document...")
-    try:
-        pdf_file = download_pdf(pdf_url)
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error downloading PDF: {e}")
-        return
+    # Read subsidiary companies' Excel files
+    subsidiaries_data = {}
+    for sub_name, info in subsidiary_info.items():
+        file = info['file']
+        excel = pd.ExcelFile(file)
+        sub_data = {}
+        for sheet_name in excel.sheet_names:
+            df = excel.parse(sheet_name)
+            sub_data[sheet_name] = df
+        subsidiaries_data[sub_name] = {'data': sub_data, 'ownership': info['ownership']}
 
-    st.write("Converting PDF pages to images...")
-    images = pdf_to_images(pdf_file)
+    # Consolidate data according to IND AS 21
+    consolidated_data = {}
+    for sheet_name in parent_excel.sheet_names:
+        parent_df = parent_data.get(sheet_name)
+        consolidated_df = parent_df.copy()
 
-    if not images:
-        st.error("Failed to convert PDF pages to images.")
-        return
+        for sub_name, sub_info in subsidiaries_data.items():
+            sub_df = sub_info['data'].get(sheet_name)
+            ownership = sub_info['ownership'] / 100.0  # Convert to decimal
 
-    st.write("Performing OCR on the images to extract text...")
-    ocr_text = ocr_images(images)
+            # Adjust subsidiary data for ownership percentage
+            sub_df_adjusted = sub_df.copy()
+            numeric_cols = sub_df_adjusted.select_dtypes(include='number').columns
+            sub_df_adjusted[numeric_cols] = sub_df_adjusted[numeric_cols] * ownership
 
-    if not ocr_text.strip():
-        st.error("OCR did not extract any text from the images.")
-        return
+            # Append adjusted subsidiary data
+            consolidated_df = pd.concat([consolidated_df, sub_df_adjusted])
 
-    st.success("Text extraction completed.")
+        # Sum up the data
+        consolidated_df = consolidated_df.groupby(consolidated_df.columns[0]).sum().reset_index()
 
-    # Output the extracted text
-    st.write("---")
-    st.write("## Extracted Text:")
-    st.write(ocr_text)
+        # Eliminate inter-company transactions
+        intercompany_accounts = consolidated_df[
+            consolidated_df[consolidated_df.columns[0]].str.contains('Intercompany', case=False, na=False)
+        ]
+        if not intercompany_accounts.empty:
+            consolidated_df = consolidated_df[
+                ~consolidated_df[consolidated_df.columns[0]].str.contains('Intercompany', case=False, na=False)
+            ]
 
-    # Provide a download button to download the text as a file
-    text_file = io.StringIO(ocr_text)
+        consolidated_data[sheet_name] = consolidated_df
+
+    # Prepare consolidated Excel file for download
+    output = BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+
+    for sheet_name, df in consolidated_data.items():
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    writer.save()
+    processed_data = output.getvalue()
+
+    st.success("Consolidation Completed")
     st.download_button(
-        label="Download Extracted Text",
-        data=text_file,
-        file_name="Extracted_Text.txt",
-        mime="text/plain"
+        label="Download Consolidated Excel File",
+        data=processed_data,
+        file_name="Consolidated_Financial_Statements.xlsx"
     )
-
-if __name__ == "__main__":
-    main()
+else:
+    st.info("Please upload both parent and subsidiary company Excel files.")
