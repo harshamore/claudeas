@@ -1,4 +1,4 @@
-streamlit
-requests
-PyMuPDF
-python-docx
+streamlit 
+pandas 
+openpyxl 
+xlsxwriter
