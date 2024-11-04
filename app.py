@@ -42,6 +42,11 @@ if parent_file is not None and subsidiary_files:
         df = parent_excel.parse(sheet_name)
         parent_data[sheet_name] = df
 
+    st.write("Parent Data:")
+    for sheet_name, df in parent_data.items():
+        st.write(f"Sheet: {sheet_name}, Shape: {df.shape}")
+        st.write(df.head())
+
     # Read subsidiary companies' Excel files
     subsidiaries_data = {}
     for sub_name, info in subsidiary_info.items():
@@ -52,6 +57,13 @@ if parent_file is not None and subsidiary_files:
             df = excel.parse(sheet_name)
             sub_data[sheet_name] = df
         subsidiaries_data[sub_name] = {'data': sub_data, 'ownership': info['ownership']}
+
+    st.write("Subsidiaries Data:")
+    for sub_name, sub_info in subsidiaries_data.items():
+        st.write(f"Subsidiary: {sub_name}")
+        for sheet_name, df in sub_info['data'].items():
+            st.write(f"Sheet: {sheet_name}, Shape: {df.shape}")
+            st.write(df.head())
 
     # Consolidate data according to IND AS 21
     consolidated_data = {}
@@ -64,24 +76,51 @@ if parent_file is not None and subsidiary_files:
             ownership = sub_info['ownership'] / 100.0  # Convert to decimal
 
             if sub_df is not None:
-                # Adjust subsidiary data for ownership percentage
+                # Ensure columns align
                 sub_df_adjusted = sub_df.copy()
+                # Align columns by reindexing
+                sub_df_adjusted = sub_df_adjusted.reindex(columns=parent_df.columns)
+                
+                # Adjust subsidiary data for ownership percentage
                 numeric_cols = sub_df_adjusted.select_dtypes(include='number').columns
+                st.write(f"Before Ownership Adjustment for {sub_name}, Sheet: {sheet_name}")
+                st.write(sub_df_adjusted[numeric_cols].head())
+
                 sub_df_adjusted[numeric_cols] = sub_df_adjusted[numeric_cols] * ownership
+
+                st.write(f"After Ownership Adjustment for {sub_name}, Sheet: {sheet_name}")
+                st.write(sub_df_adjusted[numeric_cols].head())
 
                 # Append adjusted subsidiary data
                 consolidated_df = pd.concat([consolidated_df, sub_df_adjusted], ignore_index=True)
             else:
                 st.warning(f"Sheet '{sheet_name}' not found in subsidiary '{sub_name}'. Skipping.")
 
-        # Sum up the data
-        group_by_column = consolidated_df.columns[0]  # Assuming the first column is the key
+        st.write("Consolidated DataFrame after concatenation:")
+        st.write(consolidated_df.head())
+        st.write(f"Consolidated DataFrame shape: {consolidated_df.shape}")
+
+        # Specify the correct column name for grouping
+        # Replace 'Account Code' with the actual column name you use as the key
+        group_by_column = 'Account Code'  # Example: 'Account Code', 'Account Name', etc.
+
+        if group_by_column not in consolidated_df.columns:
+            st.error(f"Group by column '{group_by_column}' not found in DataFrame columns.")
+            st.write("Available columns:", consolidated_df.columns.tolist())
+            st.stop()  # Stop execution if the group_by_column is not found
+        else:
+            st.write(f"Using '{group_by_column}' as the grouping key.")
 
         # Select numeric columns to sum
         numeric_cols = consolidated_df.select_dtypes(include=['number']).columns.tolist()
+        st.write("Numeric Columns:", numeric_cols)
 
         # Perform groupby sum on numeric columns without setting index
         consolidated_df = consolidated_df.groupby(group_by_column, as_index=False)[numeric_cols].sum()
+
+        st.write("Consolidated DataFrame after groupby and sum:")
+        st.write(consolidated_df.head())
+        st.write(f"Consolidated DataFrame shape after groupby: {consolidated_df.shape}")
 
         # Handle non-numeric columns if they exist
         non_numeric_cols = [col for col in consolidated_df.columns if col not in numeric_cols + [group_by_column]]
@@ -90,26 +129,41 @@ if parent_file is not None and subsidiary_files:
             consolidated_df = pd.merge(consolidated_df, non_numeric_data, on=group_by_column, how='left')
 
         # Eliminate inter-company transactions
+        # Adjust the filter condition as per your data
         intercompany_filter = consolidated_df[group_by_column].astype(str).str.contains(
-            'Intercompany', case=False, na=False
+            'Intercompany|Inter-company|IC', case=False, na=False
         )
+        rows_to_remove = intercompany_filter.sum()
+        st.write(f"Number of inter-company transaction rows to remove: {rows_to_remove}")
+
         if intercompany_filter.any():
             consolidated_df = consolidated_df[~intercompany_filter]
 
-        consolidated_data[sheet_name] = consolidated_df
+        st.write(f"Data after removing inter-company transactions:")
+        st.write(consolidated_df.head())
+        st.write(f"Final DataFrame shape: {consolidated_df.shape}")
 
-    # Prepare consolidated Excel file for download
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        for sheet_name, df in consolidated_data.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    processed_data = output.getvalue()
+        if consolidated_df.empty:
+            st.warning(f"The consolidated DataFrame for sheet '{sheet_name}' is empty after processing.")
+        else:
+            consolidated_data[sheet_name] = consolidated_df
 
-    st.success("Consolidation Completed")
-    st.download_button(
-        label="Download Consolidated Excel File",
-        data=processed_data,
-        file_name="Consolidated_Financial_Statements.xlsx"
-    )
+    if consolidated_data:
+        # Prepare consolidated Excel file for download
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            for sheet_name, df in consolidated_data.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        processed_data = output.getvalue()
+
+        st.success("Consolidation Completed")
+        st.download_button(
+            label="Download Consolidated Excel File",
+            data=processed_data,
+            file_name="Consolidated_Financial_Statements.xlsx"
+        )
+    else:
+        st.error("No data to consolidate after processing all sheets.")
+
 else:
     st.info("Please upload both parent and subsidiary company Excel files.")
