@@ -63,35 +63,37 @@ if parent_file is not None and subsidiary_files:
             sub_df = sub_info['data'].get(sheet_name)
             ownership = sub_info['ownership'] / 100.0  # Convert to decimal
 
-            # Adjust subsidiary data for ownership percentage
-            sub_df_adjusted = sub_df.copy()
-            numeric_cols = sub_df_adjusted.select_dtypes(include='number').columns
-            sub_df_adjusted[numeric_cols] = sub_df_adjusted[numeric_cols] * ownership
+            if sub_df is not None:
+                # Adjust subsidiary data for ownership percentage
+                sub_df_adjusted = sub_df.copy()
+                numeric_cols = sub_df_adjusted.select_dtypes(include='number').columns
+                sub_df_adjusted[numeric_cols] = sub_df_adjusted[numeric_cols] * ownership
 
-            # Append adjusted subsidiary data
-            consolidated_df = pd.concat([consolidated_df, sub_df_adjusted])
+                # Append adjusted subsidiary data
+                consolidated_df = pd.concat([consolidated_df, sub_df_adjusted], ignore_index=True)
+            else:
+                st.warning(f"Sheet '{sheet_name}' not found in subsidiary '{sub_name}'. Skipping.")
 
         # Sum up the data
-        consolidated_df = consolidated_df.groupby(consolidated_df.columns[0]).sum().reset_index()
+        # Ensure proper grouping by a common key, such as an account code or name
+        group_by_column = consolidated_df.columns[0]  # Assuming the first column is the key
+        consolidated_df = consolidated_df.groupby(group_by_column).sum().reset_index()
 
         # Eliminate inter-company transactions
-        intercompany_accounts = consolidated_df[
-            consolidated_df[consolidated_df.columns[0]].str.contains('Intercompany', case=False, na=False)
-        ]
-        if not intercompany_accounts.empty:
-            consolidated_df = consolidated_df[
-                ~consolidated_df[consolidated_df.columns[0]].str.contains('Intercompany', case=False, na=False)
-            ]
+        intercompany_filter = consolidated_df[group_by_column].astype(str).str.contains(
+            'Intercompany', case=False, na=False
+        )
+        if intercompany_filter.any():
+            consolidated_df = consolidated_df[~intercompany_filter]
 
         consolidated_data[sheet_name] = consolidated_df
 
     # Prepare consolidated Excel file for download
     output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='xlsxwriter')
-
-    for sheet_name, df in consolidated_data.items():
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
-    writer.save()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        for sheet_name, df in consolidated_data.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+        writer.save()
     processed_data = output.getvalue()
 
     st.success("Consolidation Completed")
