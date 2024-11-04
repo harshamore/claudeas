@@ -7,10 +7,7 @@ import os
 # OCR.space API endpoint
 OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image'
 # Get your API key from the environment variable
-OCR_SPACE_API_KEY = os.getenv('OCR_SPACE_API_KEY')
-if not OCR_SPACE_API_KEY:
-    st.error("OCR_SPACE_API_KEY environment variable not set.")
-    st.stop()
+OCR_SPACE_API_KEY = "K84620978388957"
 
 # URL of the PDF document
 pdf_url = "https://resource.cdn.icai.org/69249asb55316-as21.pdf"
