@@ -6,3 +6,4 @@ PyMuPDF
 openai
 requests
 pyPDF2
+pdfplumber
