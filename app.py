@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from io import BytesIO
 
 st.title("Financial Accounts Consolidation using IND AS 21")
@@ -17,10 +18,33 @@ subsidiary_files = st.file_uploader(
     key='subsidiaries'
 )
 
-# Collect ownership percentages for each subsidiary
-subsidiary_info = {}
-if subsidiary_files:
+if parent_file is not None and subsidiary_files:
+    st.header("Processing and Consolidating Data...")
+
+    # Read parent company Excel file
+    parent_excel = pd.ExcelFile(parent_file)
+    parent_sheets = parent_excel.sheet_names
+    parent_data = {}
+    for sheet in parent_sheets:
+        df = parent_excel.parse(sheet)
+        parent_data[sheet] = df
+
+    # Read subsidiary companies' Excel files
+    subsidiaries_data = {}
+    for file in subsidiary_files:
+        sub_name = file.name
+        st.write(f"Processing subsidiary: {sub_name}")
+        sub_excel = pd.ExcelFile(file)
+        sub_sheets = sub_excel.sheet_names
+        sub_data = {}
+        for sheet in sub_sheets:
+            df = sub_excel.parse(sheet)
+            sub_data[sheet] = df
+        subsidiaries_data[sub_name] = sub_data
+
+    # Collect ownership percentages for each subsidiary
     st.header("Enter Ownership Percentages for Subsidiaries")
+    ownership_percentages = {}
     for file in subsidiary_files:
         sub_name = file.name
         ownership = st.number_input(
@@ -28,125 +52,65 @@ if subsidiary_files:
             min_value=0.0,
             max_value=100.0,
             value=100.0,
-            key=sub_name
+            key=f"ownership_{sub_name}"
         )
-        subsidiary_info[sub_name] = {'file': file, 'ownership': ownership}
+        ownership_percentages[sub_name] = ownership / 100.0  # Convert to decimal
 
-if parent_file is not None and subsidiary_files:
-    st.header("Processing and Consolidating Data...")
-
-    # Read parent company Excel file
-    parent_excel = pd.ExcelFile(parent_file)
-    parent_data = {}
-    for sheet_name in parent_excel.sheet_names:
-        df = parent_excel.parse(sheet_name)
-        parent_data[sheet_name] = df
-
-    st.write("Parent Data:")
-    for sheet_name, df in parent_data.items():
-        st.write(f"Sheet: {sheet_name}, Shape: {df.shape}")
-        st.write(df.head())
-
-    # Read subsidiary companies' Excel files
-    subsidiaries_data = {}
-    for sub_name, info in subsidiary_info.items():
-        file = info['file']
-        excel = pd.ExcelFile(file)
-        sub_data = {}
-        for sheet_name in excel.sheet_names:
-            df = excel.parse(sheet_name)
-            sub_data[sheet_name] = df
-        subsidiaries_data[sub_name] = {'data': sub_data, 'ownership': info['ownership']}
-
-    st.write("Subsidiaries Data:")
-    for sub_name, sub_info in subsidiaries_data.items():
-        st.write(f"Subsidiary: {sub_name}")
-        for sheet_name, df in sub_info['data'].items():
-            st.write(f"Sheet: {sheet_name}, Shape: {df.shape}")
-            st.write(df.head())
-
-    # Consolidate data according to IND AS 21
+    # Initialize consolidated data
     consolidated_data = {}
-    for sheet_name in parent_excel.sheet_names:
-        parent_df = parent_data.get(sheet_name)
-        consolidated_df = parent_df.copy()
 
-        for sub_name, sub_info in subsidiaries_data.items():
-            sub_df = sub_info['data'].get(sheet_name)
-            ownership = sub_info['ownership'] / 100.0  # Convert to decimal
+    # Get all sheets present in parent and subsidiaries
+    all_sheets = set(parent_sheets)
+    for sub_data in subsidiaries_data.values():
+        all_sheets.update(sub_data.keys())
 
-            if sub_df is not None:
-                # Ensure columns align
-                sub_df_adjusted = sub_df.copy()
-                # Align columns by reindexing
-                sub_df_adjusted = sub_df_adjusted.reindex(columns=parent_df.columns)
-                
-                # Adjust subsidiary data for ownership percentage
-                numeric_cols = sub_df_adjusted.select_dtypes(include='number').columns
-                st.write(f"Before Ownership Adjustment for {sub_name}, Sheet: {sheet_name}")
-                st.write(sub_df_adjusted[numeric_cols].head())
+    for sheet in all_sheets:
+        # Initialize an empty DataFrame for this sheet
+        consolidated_df = pd.DataFrame()
 
-                sub_df_adjusted[numeric_cols] = sub_df_adjusted[numeric_cols] * ownership
+        # Process parent data
+        if sheet in parent_data:
+            parent_df = parent_data[sheet]
+            consolidated_df = parent_df.copy()
 
-                st.write(f"After Ownership Adjustment for {sub_name}, Sheet: {sheet_name}")
-                st.write(sub_df_adjusted[numeric_cols].head())
+        # Process subsidiary data
+        for sub_name, sub_data in subsidiaries_data.items():
+            if sheet in sub_data:
+                sub_df = sub_data[sheet].copy()
 
-                # Append adjusted subsidiary data
-                consolidated_df = pd.concat([consolidated_df, sub_df_adjusted], ignore_index=True)
+                # Align columns with parent_df
+                sub_df = sub_df.reindex(columns=consolidated_df.columns, fill_value=0)
+
+                # Adjust for ownership percentage
+                numeric_cols = sub_df.select_dtypes(include=[np.number]).columns.tolist()
+                sub_df[numeric_cols] = sub_df[numeric_cols] * ownership_percentages[sub_name]
+
+                # Append to consolidated_df
+                consolidated_df = pd.concat([consolidated_df, sub_df], ignore_index=True)
+
+        if not consolidated_df.empty:
+            # Identify key column(s) for grouping
+            possible_keys = ['Account Code', 'Account Name', 'GL Code']
+            key_cols = [col for col in possible_keys if col in consolidated_df.columns]
+            if key_cols:
+                group_by_cols = key_cols
             else:
-                st.warning(f"Sheet '{sheet_name}' not found in subsidiary '{sub_name}'. Skipping.")
+                # Use all non-numeric columns as keys
+                group_by_cols = consolidated_df.select_dtypes(exclude=[np.number]).columns.tolist()
 
-        st.write("Consolidated DataFrame after concatenation:")
-        st.write(consolidated_df.head())
-        st.write(f"Consolidated DataFrame shape: {consolidated_df.shape}")
+            # Sum numeric data
+            consolidated_df = consolidated_df.groupby(group_by_cols, as_index=False).sum()
 
-        # Specify the correct column name for grouping
-        # Replace 'Account Code' with the actual column name you use as the key
-        group_by_column = 'Account Code'  # Example: 'Account Code', 'Account Name', etc.
-
-        if group_by_column not in consolidated_df.columns:
-            st.error(f"Group by column '{group_by_column}' not found in DataFrame columns.")
-            st.write("Available columns:", consolidated_df.columns.tolist())
-            st.stop()  # Stop execution if the group_by_column is not found
-        else:
-            st.write(f"Using '{group_by_column}' as the grouping key.")
-
-        # Select numeric columns to sum
-        numeric_cols = consolidated_df.select_dtypes(include=['number']).columns.tolist()
-        st.write("Numeric Columns:", numeric_cols)
-
-        # Perform groupby sum on numeric columns without setting index
-        consolidated_df = consolidated_df.groupby(group_by_column, as_index=False)[numeric_cols].sum()
-
-        st.write("Consolidated DataFrame after groupby and sum:")
-        st.write(consolidated_df.head())
-        st.write(f"Consolidated DataFrame shape after groupby: {consolidated_df.shape}")
-
-        # Handle non-numeric columns if they exist
-        non_numeric_cols = [col for col in consolidated_df.columns if col not in numeric_cols + [group_by_column]]
-        if non_numeric_cols:
-            non_numeric_data = consolidated_df[[group_by_column] + non_numeric_cols].drop_duplicates(subset=group_by_column)
-            consolidated_df = pd.merge(consolidated_df, non_numeric_data, on=group_by_column, how='left')
-
-        # Eliminate inter-company transactions
-        # Adjust the filter condition as per your data
-        intercompany_filter = consolidated_df[group_by_column].astype(str).str.contains(
-            'Intercompany|Inter-company|IC', case=False, na=False
-        )
-        rows_to_remove = intercompany_filter.sum()
-        st.write(f"Number of inter-company transaction rows to remove: {rows_to_remove}")
-
-        if intercompany_filter.any():
+            # Eliminate inter-company transactions
+            intercompany_keywords = ['Intercompany', 'Inter-company', 'IC']
+            pattern = '|'.join(intercompany_keywords)
+            intercompany_filter = consolidated_df.apply(
+                lambda row: row.astype(str).str.contains(pattern, case=False, na=False).any(), axis=1
+            )
             consolidated_df = consolidated_df[~intercompany_filter]
 
-        st.write(f"Data after removing inter-company transactions:")
-        st.write(consolidated_df.head())
-        st.write(f"Final DataFrame shape: {consolidated_df.shape}")
-
-        if consolidated_df.empty:
-            st.warning(f"The consolidated DataFrame for sheet '{sheet_name}' is empty after processing.")
-        else:
-            consolidated_data[sheet_name] = consolidated_df
+            # Store the consolidated data for this sheet
+            consolidated_data[sheet] = consolidated_df
 
     if consolidated_data:
         # Prepare consolidated Excel file for download
@@ -163,7 +127,7 @@ if parent_file is not None and subsidiary_files:
             file_name="Consolidated_Financial_Statements.xlsx"
         )
     else:
-        st.error("No data to consolidate after processing all sheets.")
+        st.error("No data to consolidate.")
 
 else:
     st.info("Please upload both parent and subsidiary company Excel files.")
