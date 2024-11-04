@@ -4,3 +4,6 @@ openpyxl
 fpdf
 PyMuPDF
 openai
+requests
+io
+pyPDF2
