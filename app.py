@@ -2,14 +2,13 @@ import streamlit as st
 import requests
 import io
 import fitz  # PyMuPDF
-import pytesseract
-from PIL import Image
 import re
 import os
 
-# If necessary, specify the Tesseract executable path
-# pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Linux
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Windows
+# OCR.space API endpoint
+OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image'
+# Get your API key from the environment variable
+OCR_SPACE_API_KEY = K84620978388957
 
 # URL of the PDF document
 pdf_url = "https://resource.cdn.icai.org/69249asb55316-as21.pdf"
@@ -26,15 +25,30 @@ def pdf_to_images(pdf_file):
         page = doc.load_page(page_num)
         pix = page.get_pixmap()
         img_data = pix.tobytes("png")
-        image = Image.open(io.BytesIO(img_data))
-        images.append(image)
+        images.append(img_data)
     return images
+
+def ocr_image_with_api(image_data):
+    payload = {
+        'isOverlayRequired': False,
+        'apikey': OCR_SPACE_API_KEY,
+        'language': 'eng',
+    }
+    files = {
+        'filename': ('image.png', image_data),
+    }
+    response = requests.post(OCR_SPACE_API_URL, data=payload, files=files)
+    result = response.json()
+    if result.get('IsErroredOnProcessing'):
+        st.error("Error during OCR processing.")
+        return ''
+    return result['ParsedResults'][0]['ParsedText']
 
 def ocr_images(images):
     text = ""
-    for idx, image in enumerate(images):
+    for idx, image_data in enumerate(images):
         st.write(f"Performing OCR on page {idx+1}...")
-        page_text = pytesseract.image_to_string(image)
+        page_text = ocr_image_with_api(image_data)
         text += page_text + "\n"
     return text
 
@@ -46,7 +60,7 @@ def parse_steps(text):
     # Regular expression to match steps starting with "Step X:"
     pattern = r"(?:^|\n)(Step\s+\d+[\.:]?\s*)(.*?)(?=\nStep\s+\d+[\.:]?|$)"
     matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
-    
+
     steps = []
     for match in matches:
         step_title = match[0].strip()
@@ -62,8 +76,8 @@ def create_step_function(step_title, step_content, step_number):
     return step_function
 
 def main():
-    st.title("Process PDF Steps from URL using OCR")
-    
+    st.title("Process PDF Steps from URL using OCR.space API")
+
     st.write("Downloading the PDF document...")
     try:
         pdf_file = download_pdf(pdf_url)
